@@ -12,6 +12,8 @@ import scvelo as scv
 import schema
 from torch.nn.functional import normalize
 
+from collections import Counter
+
 from cellrank.kernels import VelocityKernel
 
 import torch
@@ -226,60 +228,127 @@ def calculate_diffusion_lags(A,X,lag):
 	ax = []
 	cur = A
 	for _ in range(lag):
-		ax.append(torch.matmul(cur, X))
+		ax.append(torch.matmul(cur.float(), X.float())) 
 		cur = torch.matmul(A, cur)
 		for i in range(len(cur)):
 			cur[i][i] = 0
 
 	return torch.stack(ax)
 
-def load_gc_interactions(name,results_dir,lam_list,hidden_dim=16,lag=5,penalty='H',
-						 dynamics='rna_velocity',seed=0,ignore_lag=False):
+# def load_gc_interactions(name,results_dir,lam_list,hidden_dim=16,lag=5,penalty='H',
+# 						 dynamics='rna_velocity',seed=0,ignore_lag=False):
 	
-	config_name = '{}.seed{}.h{}.{}.lag{}.{}'.format(name,seed,hidden_dim,penalty,lag,dynamics)
+# 	config_name = '{}.seed{}.h{}.{}.lag{}.{}'.format(name,seed,hidden_dim,penalty,lag,dynamics)
+
+# 	all_lags = []
+# 	for lam in lam_list:
+# 		if ignore_lag:
+# 			file_name = '{}.seed{}.lam{}.h{}.{}.lag{}.{}.ignore_lag.pt'.format(name,seed,lam,hidden_dim,penalty,lag,dynamics)
+# 			file_path = os.path.join(results_dir,config_name,file_name)
+# 			gc_lag = torch.load(file_path)
+# 			gc_lag = gc_lag.unsqueeze(-1)
+# 		else:
+# 			file_name = '{}.seed{}.lam{}.h{}.{}.lag{}.{}.pt'.format(name,seed,lam,hidden_dim,penalty,lag,dynamics)
+# 			file_path = os.path.join(results_dir,config_name,file_name)
+# 			gc_lag = torch.load(file_path)
+# 		all_lags.append(gc_lag.detach())
+
+# 	all_lags = torch.stack(all_lags)
+# 	for idx, tensor in enumerate(all_lags):
+# 		print(f"Entry {idx}: Shape {tensor.shape}")
+
+# 	return all_lags
+
+def load_gc_interactions(name, results_dir, lam_list, hidden_dim=16, lag=5, penalty='H', dynamics='rna_velocity', seed=0, ignore_lag=False):
+
+	config_name = '{}.seed{}.h{}.{}.lag{}.{}'.format(name, seed, hidden_dim, penalty, lag, dynamics)
 
 	all_lags = []
 	for lam in lam_list:
 		if ignore_lag:
-			file_name = '{}.seed{}.lam{}.h{}.{}.lag{}.{}.ignore_lag.pt'.format(name,seed,lam,hidden_dim,penalty,lag,dynamics)
-			file_path = os.path.join(results_dir,config_name,file_name)
-			gc_lag = torch.load(file_path)
-			gc_lag = gc_lag.unsqueeze(-1)
+			file_name = '{}.seed{}.lam{}.h{}.{}.lag{}.{}.ignore_lag.pt'.format(name, seed, lam, hidden_dim, penalty, lag, dynamics)
 		else:
-			file_name = '{}.seed{}.lam{}.h{}.{}.lag{}.{}.pt'.format(name,seed,lam,hidden_dim,penalty,lag,dynamics)
-			file_path = os.path.join(results_dir,config_name,file_name)
-			gc_lag = torch.load(file_path)
+			file_name = '{}.seed{}.lam{}.h{}.{}.lag{}.{}.pt'.format(name, seed, lam, hidden_dim, penalty, lag, dynamics)
+        
+		file_path = os.path.join(results_dir, config_name, file_name)
+		gc_lag = torch.load(file_path)
+        
+		if ignore_lag:
+			gc_lag = gc_lag.unsqueeze(-1)
+        
 		all_lags.append(gc_lag.detach())
 
-	all_lags = torch.stack(all_lags)
+    # Print the shapes of all entries in all_lags
+	for idx, tensor in enumerate(all_lags):
+		print(f"Entry {idx}: Shape {tensor.shape}")
+
+    # Identify the most frequent shape
+	shape_counter = Counter([tensor.shape for tensor in all_lags])
+	most_frequent_shape = shape_counter.most_common(1)[0][0]
+	print(f"Most frequent shape: {most_frequent_shape}")
+
+    # Filter out tensors that don't match the most frequent shape
+	filtered_lags = [tensor for tensor in all_lags if tensor.shape == most_frequent_shape]
+
+    # Print the shapes of the filtered tensors
+	for idx, tensor in enumerate(filtered_lags):
+		print(f"Filtered Entry {idx}: Shape {tensor.shape}")
+
+    # Stack the filtered tensors
+	all_lags = torch.stack(filtered_lags)
 
 	return all_lags
 
 def lor(x, y):
 	return x + y
 
-def estimate_interactions(all_lags,lag=5,lower_thresh=0.01,upper_thresh=0.95,
-						  binarize=False,l2_norm=False):
+# def estimate_interactions(all_lags,lag=5,lower_thresh=0.01,upper_thresh=0.95,
+# 						  binarize=False,l2_norm=False):
+
+# 	all_interactions = []
+# 	for i in range(len(all_lags)):
+# 		for j in range(lag):
+
+# 			nnz_percent = (all_lags[i,:,:,j] != 0).float().mean().data.numpy()
+# 			print("Flag 504.30 ", i, j, nnz_percent, lower_thresh, upper_thresh)
+# 			if nnz_percent > lower_thresh and nnz_percent < upper_thresh:
+# 				interactions = all_lags[i,:,:,j]
+
+# 				if l2_norm:
+# 					interactions = normalize(interactions,dim=(0,1))
+# 				if binarize:
+# 					interactions = (interactions != 0).float()
+
+# 				all_interactions.append(interactions)
+# 	return torch.stack(all_interactions).mean(0)
+
+def estimate_interactions(all_lags, lag=5, lower_thresh=0.01, upper_thresh=0.95,
+                          binarize=False, l2_norm=False):
 
 	all_interactions = []
 	for i in range(len(all_lags)):
 		for j in range(lag):
+			nnz_percent = (all_lags[i, :, :, j] != 0).float().mean().item()
+			print("Flag 504.30 ", i, j, nnz_percent, lower_thresh, upper_thresh)
 
-			nnz_percent = (all_lags[i,:,:,j] != 0).float().mean().data.numpy()
-
-			if nnz_percent > lower_thresh and nnz_percent < upper_thresh:
-				interactions = all_lags[i,:,:,j]
+			if lower_thresh < nnz_percent < upper_thresh:
+				interactions = all_lags[i, :, :, j]
 
 				if l2_norm:
-					interactions = normalize(interactions,dim=(0,1))
+					interactions = torch.nn.functional.normalize(interactions, dim=(0, 1))
 				if binarize:
 					interactions = (interactions != 0).float()
 
 				all_interactions.append(interactions)
+    
+	if not all_interactions:
+		print(all_lags.shape)
+		raise ValueError("No valid interactions found within the specified thresholds.")
+
 	return torch.stack(all_interactions).mean(0)
 
 def estimate_lags(all_lags,lag,lower_thresh=0.01,upper_thresh=1.):
-	
+
 	retained_interactions = []
 	for i in range(len(all_lags)):
 		nnz_percent = (all_lags[i] != 0).float().mean().data.numpy()

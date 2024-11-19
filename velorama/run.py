@@ -16,9 +16,9 @@ import statistics
 import scvelo as scv
 import pandas as pd
 
-from .models import *
-from .train import *
-from .utils import *
+from models import *
+from train import *
+from utils import *
 
 
 def execute_cmdline():
@@ -27,9 +27,10 @@ def execute_cmdline():
 	parser.add_argument('-n','--name',dest='name',type=str,default='velorama_run',help='substring to have in our output files')
 	parser.add_argument('-ds','--dataset',dest='dataset',type=str)
 	parser.add_argument('-dyn','--dyn',dest='dynamics',type=str,default='pseudotime', 
-						choices=['pseudotime','rna_velocity','pseudotime_time','pseudotime_precomputed'])
+						choices=['pseudotime','rna_velocity','pseudotime_time',
+                                 'pseudotime_precomputed', 'dag_precomputed'])
 	parser.add_argument('-ptloc','--ptloc',dest='ptloc',type=str,default='pseudotime')
-	parser.add_argument('-dev','--device',dest='device',type=str,default='cpu')
+	parser.add_argument('-dev','--device',dest='device',type=str,default='cuda')
 	parser.add_argument('-s','--seed',dest='seed',type=int,default=0,help='Random seed. Set to 0,1,2 etc.')
 	parser.add_argument('-lmr','--lam_ridge',dest='lam_ridge',type=float,default=0., help='Currenty unsupported')
 	parser.add_argument('-p','--penalty',dest='penalty',type=str,default='H')
@@ -179,16 +180,20 @@ def execute_cmdline():
 
 	print('# of Regs: {}, # of Targets: {}'.format(X.shape[1],Y.shape[1]))
 
-	print('Constructing DAG...')
 
 	if 'De-noised' in args.dataset:
 		sc.pp.normalize_total(adata, target_sum=1e4)
 		sc.pp.log1p(adata)
 
 	sc.pp.scale(adata)
-	A = construct_dag(adata,dynamics=args.dynamics,ptloc=args.ptloc,proba=args.proba,
-					  n_neighbors=args.n_neighbors,velo_mode=args.velo_mode,
-					  use_time=args.time_series,n_comps=args.n_comps)
+    
+    if args.dynamics == 'dag_precomputed':
+        A = adata.uns['DAG']
+
+    else: 
+        A = construct_dag(adata,dynamics=args.dynamics,ptloc=args.ptloc,proba=args.proba,
+                          n_neighbors=args.n_neighbors,velo_mode=args.velo_mode,
+                          use_time=args.time_series,n_comps=args.n_comps)
 	A = torch.FloatTensor(A)
 	AX = calculate_diffusion_lags(A,X,args.lag)
 

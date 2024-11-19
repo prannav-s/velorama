@@ -11,16 +11,19 @@ import torch
 import torch.nn as nn
 from copy import deepcopy
 import time
+import json
+from models import *
+from utils import *
+from torch.nn.utils import clip_grad_norm_
 
-from .models import *
-from .utils import *
 
 def train_model(config):
 
-	AX = config["AX"]
-	AY = config["AY"]
+	AX = config["AX"].float()
+    
+	AY = config["AY"].float()
 
-	Y = config["Y"]
+	Y = config["Y"].float()
 
 	name = config["name"]
 
@@ -57,6 +60,7 @@ def train_model(config):
 
 		AX = AX.to(device)		
 		Y = Y.to(device)
+		print("Flag 60:", torch.isnan(Y).sum().item())
 
 		if reg_target:
 			vmlp = VeloramaMLPTarget(num_targets, num_regs, lag=lag, hidden=hidden, 
@@ -89,8 +93,11 @@ def train_model(config):
 		# print('LOSS:---',loss)
 
 		ridge = ridge_regularize(vmlp, lam_ridge) 
+		print("Flag 92.1:", vmlp)
+		print("Flag 92.2:", lam_ridge)
+		print("Flag 92.3:", ridge, loss)
 		smooth = loss + ridge
-
+		print("Flag 97:", smooth)
 		variable_usage_list = []
 		loss_list = []
 
@@ -103,10 +110,15 @@ def train_model(config):
 		for it in range(max_iter):
 
 			start = time.time()
-
-			# Take gradient step.
-			smooth.backward()
-			for param in vmlp.parameters():
+			if it != 0 and it%100==0: #reduce lr every 100 it
+				lr = lr*0.95
+				print(f"LEARNING RATE: {lr}")
+			#Take gradient step. 
+			smooth.backward() 
+			# Clip gradients here
+			grad_clip_value = 1.0
+			clip_grad_norm_(vmlp.parameters(), grad_clip_value) 
+			for param in vmlp.parameters(): 
 				param.data = param - lr * param.grad
 
 			# Take prox step.
@@ -116,6 +128,7 @@ def train_model(config):
 					prox_update_target(vmlp, lam, lr, penalty)
 				else:
 					prox_update(vmlp, lam, lr, penalty)
+				print("Flag 124:", smooth)
 
 			vmlp.zero_grad()
 
@@ -131,18 +144,20 @@ def train_model(config):
 			smooth = loss + ridge
 
 			# Check progress.
+     
+			print("Flag 136:", it)  
 			if (it + 1) % check_every == 0:
-
+				print("Flag 138:", it, reg_target)  
 				if reg_target:
 					nonsmooth = regularize_target(vmlp, lam, penalty)
 				else:
 					nonsmooth = regularize(vmlp, lam, penalty)
 				mean_loss = (smooth + nonsmooth).detach()/Y.shape[1]
-
+				print("Flag 143:", smooth, nonsmooth, Y.shape[1]) 
 				variable_usage = torch.mean(vmlp.GC(ignore_lag=False).float())
 				variable_usage_list.append(variable_usage)
 				loss_list.append(mean_loss)
-
+				print("current mean loss is: ", mean_loss)              
 				# Check for early stopping.
 				if mean_loss < best_loss:
 					best_loss = mean_loss
@@ -153,7 +168,6 @@ def train_model(config):
 						print('Lam={}: Iter {}, {} sec'.format(lam,it+1,np.round(time.time()-start,2)),
 							  '-----','Loss: %.2f' % mean_loss,', Variable usage = %.2f%%' % (100 * variable_usage)) # ,
 							  # '|||','%.3f' % loss_crit,'%.3f' % variable_usage_crit)
-
 				elif (it - best_it) == lookback * check_every:
 					if verbose:
 						print('EARLY STOP: Lam={}, Iter {}'.format(lam,it + 1))
@@ -177,3 +191,13 @@ def train_model(config):
 
 		GC_lag = vmlp.GC(threshold=False, ignore_lag=True).cpu()
 		torch.save(GC_lag, os.path.join(results_dir,dir_name,file_name + '.ignore_lag.pt'))
+        
+		list_file = f'loss_list_lam{np.round(lam,4)}.json'
+
+		file_path = f'{results_dir}/{dir_name}/{list_file}'
+
+		# Write the list to the file without modifying it
+		with open(file_path, 'w') as file:
+			json.dump([float(loss_item) for loss_item in loss_list], file)
+
+		print(f'List saved to {file_path}')
